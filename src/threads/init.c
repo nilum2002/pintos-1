@@ -73,8 +73,7 @@ static void locate_block_device (enum block_type, const char *name);
 int pintos_init (void) NO_RETURN;
 
 /* Pintos main entry point. */
-int
-pintos_init (void)
+int pintos_init (void)
 {
   char **argv;
 
@@ -127,20 +126,113 @@ pintos_init (void)
   filesys_init (format_filesys);
 #endif
 
-  printf ("Boot complete.\n");
+  printf ("Boot completed.\n");
+
+  printf("Hi Nilum Mudaliarachchi\n");
   
   if (*argv != NULL) {
     /* Run actions specified on kernel command line. */
     run_actions (argv);
   } else {
     // TODO: no command line passed to kernel. Run interactively 
+    printf("Welcome to the PintOS...\n");
+    char input_buf[100];
+    const char *Strings_to_match[] = { "whoami", "shutdown", "time", "ram", "thread", "priority", "exit", NULL };
+    int idx = 0;
+    printf ("CS2043>");
+    while (true)
+      {
+        int ch = input_getc (); /* returns int/byte; use int to check EOF if any */
+        if (ch < 0)
+          continue;
+        
+        // printf ("%c", (char) ch);
+        
+       
+        
+        if (ch == '\r' || ch == '\n')
+          {
+            input_buf[idx] = '\0'; /* terminate */
+
+            if (idx == 0)
+              {
+                printf("\n");
+                continue;
+              }
+
+            /* Process commands */
+            if (strcmp (input_buf, Strings_to_match[0]) == 0)      /* whoami */
+              {
+                printf ("\nMudaliarachchi N.S - 230415H\n");
+              }
+            else if (strcmp (input_buf, Strings_to_match[1]) == 0) /* shutdown */
+              {
+                printf ("\nPintos is shutting down...\n");
+                shutdown_power_off ();
+              }
+            else if (strcmp (input_buf, Strings_to_match[2]) == 0) /* time */
+              {
+                time_t Time = rtc_get_time ();
+                printf ("\n%lu seconds since booted\n", (unsigned long) (Time / 1000));
+              }
+            else if (strcmp (input_buf, Strings_to_match[3]) == 0) /* ram */
+              {
+                printf ("\nPintos booting with %'" PRIu32 " kB RAM...\n",
+                        init_ram_pages * PGSIZE / 1024);
+              }
+            else if (strcmp (input_buf, Strings_to_match[4]) == 0) /* thread */
+              {
+                printf ("\n");
+                thread_print_stats ();
+              }
+            else if (strcmp (input_buf, Strings_to_match[5]) == 0) /* priority */
+              {
+                int priority = thread_get_priority ();
+                printf ("\nPriority of the current thread is: %d\n", priority);
+              }
+            else if (strcmp (input_buf, Strings_to_match[6]) == 0) /* exit */
+              {
+                printf ("\nExiting Interactive Shell ... Good Bye\n");
+                break;
+              }
+            else
+              {
+                printf ("\nEnter a valid Command!!!\n");
+              }
+
+            idx = 0;
+            printf ("CS2043>");
+          }
+        else if (ch == '\b'){
+        
+          if (idx > 0){
+            idx--;
+            input_buf[idx] = '\0';
+           
+            printf("\b \b");
+
+          }
+        }
+        else
+          {
+            
+            if (idx < (sizeof(input_buf) - 1))
+              {
+                input_buf[idx++] = (char) ch;
+                if(ch >= 32 && ch <= 126){
+                    printf("%c", (char)ch);
+                }
+                
+              }
+          }
+      }
   }
 
   /* Finish up. */
   shutdown ();
   thread_exit ();
 }
-
+
 /* Clear the "BSS", a segment that should be initialized to
    zeros.  It isn't actually stored on disk or zeroed by the
    kernel loader, so we have to zero it ourselves.
@@ -191,7 +283,9 @@ paging_init (void)
      of the Page Directory". */
   asm volatile ("movl %0, %%cr3" : : "r" (vtop (init_page_dir)));
 }
-
+/*
+gcc -o hellomake hellomake.c hellofunc.c -I
+*/
 /* Breaks the kernel command line into words and returns them as
    an argv-like array. */
 static char **
