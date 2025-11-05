@@ -11,8 +11,8 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
-#ifdef USERPROG
 #include "userprog/process.h"
+#ifdef USERPROG
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -231,15 +231,15 @@ thread_block (void)
 void
 thread_unblock (struct thread *t) 
 {
-  enum intr_level old_level;
+  enum intr_level old;
 
   ASSERT (is_thread (t));
 
-  old_level = intr_disable ();
+  old = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
-  intr_set_level (old_level);
+  intr_set_level (old);
 }
 
 /* Returns the name of the running thread. */
@@ -255,17 +255,17 @@ thread_name (void)
 struct thread *
 thread_current (void) 
 {
-  struct thread *t = running_thread ();
+  struct thread *running = running_thread ();
   
   /* Make sure T is really a thread.
      If either of these assertions fire, then your thread may
      have overflowed its stack.  Each thread has less than 4 kB
      of stack, so a few big automatic arrays or moderate
      recursion can cause stack overflow. */
-  ASSERT (is_thread (t));
-  ASSERT (t->status == THREAD_RUNNING);
+  ASSERT (is_thread (running));
+  ASSERT (running->status == THREAD_RUNNING);
 
-  return t;
+  return running;
 }
 
 /* Returns the running thread's tid. */
@@ -273,6 +273,23 @@ tid_t
 thread_tid (void) 
 {
   return thread_current ()->tid;
+}
+
+/* Finds and returns a thread with the given TID, or NULL if not found. */
+
+struct thread *
+thread_get_by_tid (tid_t tid)
+{
+  struct list_elem *a;
+
+  for (a = list_begin (&all_list); a != list_end (&all_list);
+       a = list_next (a))
+    {
+      struct thread *t = list_entry (a, struct thread, allelem);
+      if (t->tid == tid)
+        return t;
+    }
+  return NULL;
 }
 
 /* Deschedules the current thread and destroys it.  Never
@@ -302,16 +319,16 @@ void
 thread_yield (void) 
 {
   struct thread *cur = thread_current ();
-  enum intr_level old_level;
+  enum intr_level old_l;
   
   ASSERT (!intr_context ());
 
-  old_level = intr_disable ();
+  old_l = intr_disable ();
   if (cur != idle_thread) 
     list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
-  intr_set_level (old_level);
+  intr_set_level (old_l);
 }
 
 /* Invoke function 'func' on all threads, passing along 'aux'.
@@ -319,14 +336,14 @@ thread_yield (void)
 void
 thread_foreach (thread_action_func *func, void *aux)
 {
-  struct list_elem *e;
+  struct list_elem *a;
 
   ASSERT (intr_get_level () == INTR_OFF);
 
-  for (e = list_begin (&all_list); e != list_end (&all_list);
-       e = list_next (e))
+  for (a = list_begin (&all_list); a != list_end (&all_list);
+       a = list_next (a))
     {
-      struct thread *t = list_entry (e, struct thread, allelem);
+      struct thread *t = list_entry (a, struct thread, allelem);
       func (t, aux);
     }
 }
@@ -451,7 +468,7 @@ is_thread (struct thread *t)
 static void
 init_thread (struct thread *t, const char *name, int priority)
 {
-  enum intr_level old_level;
+  enum intr_level old_l;
 
   ASSERT (t != NULL);
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
@@ -464,9 +481,24 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
-  old_level = intr_disable ();
+  old_l = intr_disable ();
   list_push_back (&all_list, &t->allelem);
-  intr_set_level (old_level);
+  intr_set_level (old_l);
+
+
+  #ifdef USERPROG
+  t->exit_code = -1;
+  t->load_ok = false;
+  t->executable = NULL;
+  list_init (&t->children);
+  sema_init (&t->wait_sema, 0);
+  t->parent_tid = TID_ERROR;
+  t->waited_on = false;
+  t->next_fd = 2;  /* 0 and 1 are reserved for stdin/stdout */
+  int i;
+  for (i = 0; i < 128; i++)
+    t->files[i] = NULL;
+  #endif
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

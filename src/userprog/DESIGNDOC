@@ -1,0 +1,215 @@
+		     +--------------------------+
+       	       	     |		CS 318		|
+		     | PROJECT 2: USER PROGRAMS	|
+		     | 	   DESIGN DOCUMENT     	|
+		     +--------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Tharaka Jayasena <tharakaj.23@cse.mrt.ac.lk>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+			   ARGUMENT PASSING
+			   ================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+No new data structures for argument passing. Used existing stack setup in setup_stack().
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+>> How do you avoid overflowing the stack page?
+
+Used strtok_r() to tokenize the command line. Push arguments onto stack in reverse order,
+then push their addresses in reverse order. This gives correct argv[0], argv[1], etc.
+Check that esp doesn't go below PHYS_BASE - PGSIZE to avoid overflow.
+
+---- RATIONALE ----
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+
+strtok_r() is reentrant and thread-safe. strtok() uses static storage, which would
+cause race conditions in a multithreaded kernel.
+
+>> A4: In Pintos, the kernel separates commands into a executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+
+1. Security: Shell validates commands before passing to kernel, reducing attack surface.
+2. Flexibility: Shell can implement complex parsing (wildcards, pipes) without kernel complexity.
+
+			     SYSTEM CALLS
+			     ============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+In threads/thread.h (struct thread):
+  struct file *files[128];        /* File descriptor table */
+  int next_fd;                    /* Next available file descriptor */
+  struct list children;           /* List of child processes */
+  struct semaphore wait_sema;     /* Semaphore for wait synchronization */
+  tid_t parent_tid;               /* Parent thread ID */
+  bool waited_on;                 /* Whether parent has waited on this thread */
+  int exit_code;                  /* Process exit code */
+  bool load_ok;                   /* Whether executable loaded successfully */
+  struct file *executable;        /* Currently executing file (deny write) */
+
+In userprog/process.c:
+  struct child_process {
+    tid_t tid;                    /* Child thread ID */
+    int exit_code;                /* Child's exit code */
+    bool exited;                  /* Whether child has exited */
+    struct list_elem elem;        /* List element for parent's children list */
+  };
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+
+File descriptors are stored in a per-thread array (files[128]). FDs 0-1 are reserved
+for stdin/stdout. FDs are unique within a process, not OS-wide. Each process has its
+own independent file descriptor table.
+
+---- ALGORITHMS ----
+
+>> B3: Describe your code for reading and writing user data from the
+>> kernel.
+
+Validate user pointers with is_valid_ptr() before accessing. Check pointer is non-null,
+below PHYS_BASE, and mapped in page directory. For buffers, validate entire range.
+If invalid, call sys_exit(-1) to terminate process.
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  What is the least
+>> and the greatest possible number of inspections of the page table
+>> (e.g. calls to pagedir_get_page()) that might result?  What about
+>> for a system call that only copies 2 bytes of data?  Is there room
+>> for improvement in these numbers, and how much?
+
+For 4096 bytes: minimum 1 inspection (if aligned to page), maximum 2 (if spans pages).
+For 2 bytes: minimum 1, maximum 2 (if crosses page boundary).
+Could improve by caching page lookups or using alternative validation methods.
+
+>> B5: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+
+Parent maintains a list of child_process structs. wait() searches for matching child.
+If child hasn't exited, parent blocks on child's wait_sema. When child exits, it
+updates parent's child_process with exit_code and signals wait_sema. Parent wakes,
+retrieves exit code, and frees child_process.
+
+>> B6: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> paragraphs, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+
+We use a centralized validation function is_valid_ptr() at syscall entry. All pointers
+are validated before dereferencing. For buffer validation, we check both start and end.
+If validation fails, we call sys_exit(-1) which handles all cleanup.
+
+Process cleanup is centralized in process_exit(). It closes all file descriptors,
+closes the executable file, notifies parent, and frees resources. This ensures cleanup
+happens regardless of how the process terminates (normal exit, exception, or bad pointer).
+
+Example: In write syscall, we validate buffer pointer and size before accessing. If
+invalid, sys_exit(-1) is called, which triggers process_exit() to close all files
+and notify parent before terminating.
+
+---- SYNCHRONIZATION ----
+
+>> B7: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+
+process_execute() uses a semaphore (process_info.sema) to wait for child's load.
+Parent downs the semaphore, child loads executable and sets load_success flag, then
+ups the semaphore. Parent checks load_success and returns child tid or -1.
+
+>> B8: Consider parent process P with child process C.  How do you
+>> ensure proper synchronization and avoid race conditions when P
+>> calls wait(C) before C exits?  After C exits?  How do you ensure
+>> that all resources are freed in each case?  How about when P
+>> terminates without waiting, before C exits?  After C exits?  Are
+>> there any special cases?
+
+Before C exits: P blocks on C's wait_sema until C signals it in process_exit().
+After C exits: child_process.exited is true, so P doesn't block and immediately gets exit_code.
+P terminates without waiting: child_process remains in memory until C exits and tries to
+signal parent (parent check prevents null pointer). Resources freed when C exits.
+All cases handled by checking parent existence with thread_get_by_tid() before signaling.
+
+---- RATIONALE ----
+
+>> B9: Why did you choose to implement access to user memory from the
+>> kernel in the way that you did?
+
+Validating pointers before access is simpler and catches errors early. Using
+pagedir_get_page() ensures we only access mapped memory. This approach is
+straightforward and prevents kernel crashes from bad user pointers.
+
+>> B10: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+
+Advantages: Simple array lookup is O(1), easy to implement, fixed upper bound.
+Disadvantages: Limited to 128 files per process, wastes memory for unused slots,
+linear search to find free fd.
+
+>> B11: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+
+We kept the identity mapping (tid == pid) for simplicity. No advantages to changing it
+for this project.
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
